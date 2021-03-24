@@ -9,11 +9,9 @@ const bidderVersion = '1.0';
 const VIDEO_TARGETING = ['startdelay', 'mimes', 'minduration', 'maxduration',
   'startdelay', 'skippable', 'playbackmethod', 'api', 'protocols', 'boxingallowed',
   'linearity', 'delivery', 'protocol', 'placement', 'minbitrate', 'maxbitrate', 'ext'];
-export const REQUEST_URL = 'https://rtb.openx.net/openrtbb/prebidjs';
-export const SYNC_URL = 'https://u.openx.net/w/1.0/pd?ph=2d1251ae-7f3a-47cf-bd2a-2f288854a0ba';
 
 export const spec = {
-  code: 'openx',
+  code: 'swan2',
   supportedMediaTypes: [BANNER, VIDEO],
   isBidRequestValid,
   buildRequests,
@@ -32,16 +30,7 @@ function transformBidParams(params, isOpenRtb) {
 }
 
 function isBidRequestValid(bidRequest) {
-  const hasDelDomainOrPlatform = bidRequest.params.delDomain ||
-    bidRequest.params.platform;
-
-  if (utils.deepAccess(bidRequest, 'mediaTypes.banner') &&
-    hasDelDomainOrPlatform) {
-    return !!bidRequest.params.unit ||
-      utils.deepAccess(bidRequest, 'mediaTypes.banner.sizes.length') > 0;
-  }
-
-  return !!(bidRequest.params.unit && hasDelDomainOrPlatform);
+  return !!(bidRequest.params.offerId && bidRequest.params.endpoint);
 }
 
 function buildRequests(bids, bidderRequest) {
@@ -60,27 +49,25 @@ function createBannerRequest(bids, bidderRequest) {
     const floor = getFloor(bid, BANNER);
     let imp = {
       id: bid.bidId,
-      tagid: bid.params.unit,
+      tagid: bid.adUnitCode,
       banner: {
         format: toFormat(bid.mediaTypes.banner.sizes),
         topframe: utils.inIframe() ? 0 : 1
       },
-      ext: {adUnitCode: bid.adUnitCode}
+      ext: {
+        dfp_ad_unit_code: bid.adUnitCode,
+        owid: bid.params.offerId
+      }
     };
-    if (bid.params.customParams) {
-      utils.deepSetValue(imp, 'ext.customParams', bid.params.customParams);
-    }
     if (floor > 0) {
       imp.bidfloor = floor;
       imp.bidfloorcur = 'USD';
-    } else if (bid.params.customFloor) {
-      imp.bidfloor = bid.params.customFloor;
     }
     return imp;
   });
   return {
     method: 'POST',
-    url: REQUEST_URL,
+    url: bids[0].params.endpoint,
     data: data
   }
 }
@@ -111,27 +98,19 @@ function createVideoRequest(bid, bidderRequest) {
   let data = getBaseRequest(bid, bidderRequest);
   data.imp = [{
     id: bid.bidId,
-    tagid: bid.params.unit,
+    tagid: bid.adUnitCode,
     video: {
       w: width,
       h: height,
       topframe: utils.inIframe() ? 0 : 1
     },
-    ext: {dfp_ad_unit_code: bid.adUnitCode}
+    ext: {
+      owid: bid.params.offerId
+    }
   }];
-  if (bid.params.customParams) {
-    utils.deepSetValue(data.imp[[0]], 'ext.customParams', bid.params.customParams);
-  }
   if (floor > 0) {
     data.imp[0].bidfloor = floor;
     data.imp[0].bidfloorcur = 'USD';
-  } else if (bid.params.customFloor) {
-    data.imp[0].bidfloor = bid.params.customFloor;
-  }
-  if (bid.params.openrtb) {
-    Object.keys(bid.params.openrtb)
-      .filter(param => includes(VIDEO_TARGETING, param))
-      .forEach(param => data.imp[0].video[param] = bid.params.openrtb[param]);
   }
   if (bid.params.video) {
     Object.keys(bid.params.video)
@@ -147,7 +126,7 @@ function createVideoRequest(bid, bidderRequest) {
   }
   return {
     method: 'POST',
-    url: REQUEST_URL,
+    url: bids.params.endpoint,
     data: data
   }
 }
@@ -170,17 +149,8 @@ function getBaseRequest(bid, bidderRequest) {
       w: screen.width,
       ua: window.navigator.userAgent,
       language: window.navigator.language.split('-').shift()
-    },
-    ext: {
-      bc: bid.params.bc || `${bidderConfig}_${bidderVersion}`
     }
   };
-  if (bid.params.platform) {
-    utils.deepSetValue(req, 'ext.platform', bid.params.platform);
-  }
-  if (bid.params.delDomain) {
-    utils.deepSetValue(req, 'ext.delDomain', bid.params.delDomain);
-  }
   if (bid.params.test) {
     req.test = 1
   }
@@ -241,6 +211,20 @@ function interpretResponse(resp, req) {
     return [];
   }
 
+  let response = {
+    ad: respBody,
+    requestId: req.bidId,
+    cpm: 4,
+    width: 300,
+    height: 250,
+    creativeId: 'crid',
+    currency: 'USD',
+    netRevenue: true,
+    ttl: 300,
+    mediaType: BANNER
+  };
+  return response;
+
   let bids = [];
   respBody.seatbid.forEach(seatbid => {
     bids = [...bids, ...seatbid.bid.map(bid => {
@@ -284,23 +268,4 @@ function interpretResponse(resp, req) {
  * @return {{type: (string), url: (*|string)}[]}
  */
 function getUserSyncs(syncOptions, responses, gdprConsent, uspConsent) {
-  if (syncOptions.iframeEnabled || syncOptions.pixelEnabled) {
-    let pixelType = syncOptions.iframeEnabled ? 'iframe' : 'image';
-    let queryParamStrings = [];
-    let syncUrl = SYNC_URL;
-    if (gdprConsent) {
-      queryParamStrings.push('gdpr=' + (gdprConsent.gdprApplies ? 1 : 0));
-      queryParamStrings.push('gdpr_consent=' + encodeURIComponent(gdprConsent.consentString || ''));
-    }
-    if (uspConsent) {
-      queryParamStrings.push('us_privacy=' + encodeURIComponent(uspConsent));
-    }
-    if (responses.length > 0 && responses[0].body && responses[0].body.ext && responses[0].body.ext.sync_url) {
-      syncUrl = responses[0].body.ext.sync_url
-    }
-    return [{
-      type: pixelType,
-      url: `${syncUrl}${queryParamStrings.length > 0 ? '&' + queryParamStrings.join('&') : ''}`
-    }];
-  }
 }

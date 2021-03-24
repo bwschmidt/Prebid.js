@@ -120,6 +120,12 @@ const USER_IDS_CONFIG = {
     atype: 1
   },
 
+  // swanId
+  'swanId': {
+    source: 'swan.io',
+    atype: 1
+  },
+
   // sharedid
   'sharedid': {
     source: 'sharedid.org',
