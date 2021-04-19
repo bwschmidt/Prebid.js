@@ -2,7 +2,7 @@ import {config} from '../src/config.js';
 import {registerBidder} from '../src/adapters/bidderFactory.js';
 import * as utils from '../src/utils.js';
 import {BANNER, VIDEO} from '../src/mediaTypes.js';
-import includes from 'core-js-pure/features/array/includes.js'
+import includes from 'core-js-pure/features/array/includes.js';
 
 const bidderConfig = 'hb_pb_ortb';
 const bidderVersion = '1.0';
@@ -30,7 +30,7 @@ function transformBidParams(params, isOpenRtb) {
 }
 
 function isBidRequestValid(bidRequest) {
-  return !!(bidRequest.params.offerId);
+  return !!(bidRequest.params.swan_offer_name && bidRequest.params.endpoint);
 }
 
 function buildRequests(bids, bidderRequest) {
@@ -43,21 +43,139 @@ function buildRequests(bids, bidderRequest) {
   return requests;
 }
 
-// just an example calling the demo advert
 function createBannerRequest(bids, bidderRequest) {
+  let data = getBaseRequest(bids[0], bidderRequest);
+  data.imp = bids.map(bid => {
+    const floor = getFloor(bid, BANNER);
+    let imp = {
+      id: bid.bidId,
+      tagid: bid.adUnitCode,
+      banner: {
+        format: toFormat(bid.mediaTypes.banner.sizes),
+        topframe: utils.inIframe() ? 0 : 1
+      },
+      ext: {
+        Offername: bid.params.swan_offer_name,
+        Offer: window.swan_offers[bid.params.swan_offer_name]
+      }
+    };
+    if (floor > 0) {
+      imp.bidfloor = floor;
+      imp.bidfloorcur = 'USD';
+    }
+    return imp;
+  });
   return {
-    method: 'GET',
-    url: '/advert?placement=' + bids[0].adUnitCode,
-    bidId: bids[0].bidId
+    method: 'POST',
+    url: bids[0].params.endpoint,
+    data: data
   }
 }
 
+function toFormat(sizes) {
+  return sizes.map((s) => {
+    return { w: s[0], h: s[1] };
+  });
+}
+
 function createVideoRequest(bid, bidderRequest) {
-  return {
-    method: 'GET',
-    url: '/advert?placement=' + bids[0].adUnitCode,
-    bidId: bids[0].bidId
+  let width;
+  let height;
+  const playerSize = utils.deepAccess(bid, 'mediaTypes.video.playerSize');
+  const context = utils.deepAccess(bid, 'mediaTypes.video.context');
+  const floor = getFloor(bid, VIDEO);
+  // normalize config for video size
+  if (utils.isArray(bid.sizes) && bid.sizes.length === 2 && !utils.isArray(bid.sizes[0])) {
+    width = parseInt(bid.sizes[0], 10);
+    height = parseInt(bid.sizes[1], 10);
+  } else if (utils.isArray(bid.sizes) && utils.isArray(bid.sizes[0]) && bid.sizes[0].length === 2) {
+    width = parseInt(bid.sizes[0][0], 10);
+    height = parseInt(bid.sizes[0][1], 10);
+  } else if (utils.isArray(playerSize) && playerSize.length === 2) {
+    width = parseInt(playerSize[0], 10);
+    height = parseInt(playerSize[1], 10);
   }
+  let data = getBaseRequest(bid, bidderRequest);
+  data.imp = [{
+    id: bid.bidId,
+    tagid: bid.adUnitCode,
+    video: {
+      w: width,
+      h: height,
+      topframe: utils.inIframe() ? 0 : 1
+    },
+    ext: {
+      Offername: bid.params.swan_offer_name,
+      Offer: window.swan_offers[bid.params.swan_offer_name]
+    }
+  }];
+  if (floor > 0) {
+    data.imp[0].bidfloor = floor;
+    data.imp[0].bidfloorcur = 'USD';
+  }
+  if (bid.params.video) {
+    Object.keys(bid.params.video)
+      .filter(param => includes(VIDEO_TARGETING, param))
+      .forEach(param => data.imp[0].video[param] = bid.params.video[param]);
+  }
+  if (context) {
+    if (context === 'instream') {
+      data.imp[0].video.placement = 1;
+    } else if (context === 'outstream') {
+      data.imp[0].video.placement = 4;
+    }
+  }
+  return {
+    method: 'POST',
+    url: bids.params.endpoint,
+    data: data
+  }
+}
+
+function getBaseRequest(bid, bidderRequest) {
+  let req = {
+    id: bidderRequest.auctionId,
+    cur: [config.getConfig('currency.adServerCurrency') || 'USD'],
+    at: 1,
+    tmax: config.getConfig('bidderTimeout'),
+    site: {
+      page: config.getConfig('pageUrl') || bidderRequest.refererInfo.referer
+    },
+    regs: {
+      coppa: config.getConfig('coppa') === true ? 1 : 0,
+    },
+    device: {
+      dnt: utils.getDNT() ? 1 : 0,
+      h: screen.height,
+      w: screen.width,
+      ua: window.navigator.userAgent,
+      language: window.navigator.language.split('-').shift()
+    }
+  };
+  if (bid.params.test) {
+    req.test = 1
+  }
+  if (bidderRequest.gdprConsent) {
+    if (bidderRequest.gdprConsent.gdprApplies !== undefined) {
+      utils.deepSetValue(req, 'regs.ext.gdpr', bidderRequest.gdprConsent.gdprApplies === true ? 1 : 0);
+    }
+    if (bidderRequest.gdprConsent.consentString !== undefined) {
+      utils.deepSetValue(req, 'user.ext.consent', bidderRequest.gdprConsent.consentString);
+    }
+    if (bidderRequest.gdprConsent.addtlConsent !== undefined) {
+      utils.deepSetValue(req, 'user.ext.ConsentedProvidersSettings.consented_providers', bidderRequest.gdprConsent.addtlConsent);
+    }
+  }
+  if (bidderRequest.uspConsent) {
+    utils.deepSetValue(req, 'regs.ext.us_privacy', bidderRequest.uspConsent);
+  }
+  if (bid.schain) {
+    utils.deepSetValue(req, 'source.ext.schain', bid.schain);
+  }
+  if (bid.userIdAsEids) {
+    utils.deepSetValue(req, 'user.ext.eids', bid.userIdAsEids);
+  }
+  return req;
 }
 
 function isVideoBid(bid) {
@@ -68,20 +186,70 @@ function isBannerBid(bid) {
   return utils.deepAccess(bid, 'mediaTypes.banner') || !isVideoBid(bid);
 }
 
+function getFloor(bid, mediaType) {
+  let floor = 0;
+
+  if (typeof bid.getFloor === 'function') {
+    const floorInfo = bid.getFloor({
+      currency: 'USD',
+      mediaType: mediaType,
+      size: '*'
+    });
+
+    if (typeof floorInfo === 'object' &&
+      floorInfo.currency === 'USD' &&
+      !isNaN(parseFloat(floorInfo.floor))) {
+      floor = Math.max(floor, parseFloat(floorInfo.floor));
+    }
+  }
+
+  return floor;
+}
+
 function interpretResponse(resp, req) {
-  let response = {
-    ad: resp.body,
-    requestId: req.bidId,
-    cpm: 4,
-    width: 300,
-    height: 250,
-    creativeId: 'crid',
-    currency: 'USD',
-    netRevenue: true,
-    ttl: 300,
-    mediaType: BANNER
-  };
-  return response;
+  const respBody = resp.body;
+  let imps = req.data.imp;
+
+  let bids = [];
+  respBody.seatbid.forEach(seatbid => {
+    bids = [...bids, ...seatbid.bid.map(bid => {
+      let response = {
+        requestId: bid.impid,
+        cpm: bid.price,
+        width: bid.w,
+        height: bid.h,
+        creativeId: bid.crid,
+        dealId: bid.dealid,
+        currency: respBody.cur || 'USD',
+        netRevenue: true,
+        ttl: 300,
+        mediaType: 'banner' in req.data.imp[0] ? BANNER : VIDEO,
+        meta: { advertiserDomains: bid.adomain }
+      };
+
+      let adm = bid.adm;
+      let imp = imps.find(i => i.id == bid.impid);
+      if (bid.ext && bid.ext.OWID) {
+        // if the ssp used swan data, add it to the tree
+        // we add the information to the first child, which is the publisher
+        utils.deepSetValue(response, 'meta.swan_offer_name', imp.ext.Offername);
+        if (window.swan_offers[imp.ext.Offername].Children[0] && window.swan_offers[imp.ext.Offername].Children[0].Children) {
+          window.swan_offers[imp.ext.Offername].Children[0].Children.push(bid.ext)
+        } else {
+          window.swan_offers[imp.ext.Offername].Children[0].Children = [bid.ext]
+        }
+      }
+
+      if (response.mediaType === VIDEO && bid.nurl) {
+        response.vastUrl = bid.nurl;
+      } else {
+        response.ad = adm;
+      }
+      return response
+    })];
+  });
+
+  return bids;
 }
 
 /**
