@@ -231,15 +231,17 @@ function interpretResponse(resp, req) {
       let imp = imps.find(i => i.id == bid.impid);
       if (bid.ext && bid.ext.OWID) {
         // if the ssp used swan data, add it to the tree
-        // we add the information to the first child, which is the publisher
-        utils.deepSetValue(response, 'meta.swan_offer_name', imp.ext.Offername);
-        if (window.swan_offers[imp.ext.Offername].Children[0] && window.swan_offers[imp.ext.Offername].Children[0].Children) {
-          window.swan_offers[imp.ext.Offername].Children[0].Children.push(bid.ext)
-        } else {
-          window.swan_offers[imp.ext.Offername].Children[0].Children = [bid.ext]
+        const name = imp.ext.Offername
+        utils.deepSetValue(response, 'meta.swan_offer_name', name);
+        if (window.swan_offers[name]) {
+          if (bid.ext.OWID == window.swan_offers[name].OWID) {
+            if (bid.ext.Children != null) {
+              window.swan_offers[name].Children = window.swan_offers[name].Children || []
+              window.swan_offers[imp.ext.Offername].Children = window.swan_offers[imp.ext.Offername].Children.concat(bid.ext.Children)
+            }
+          }
         }
       }
-
       if (response.mediaType === VIDEO && bid.nurl) {
         response.vastUrl = bid.nurl;
       } else {
