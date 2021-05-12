@@ -10,8 +10,8 @@ const VIDEO_TARGETING = ['startdelay', 'mimes', 'minduration', 'maxduration',
   'startdelay', 'skippable', 'playbackmethod', 'api', 'protocols', 'boxingallowed',
   'linearity', 'delivery', 'protocol', 'placement', 'minbitrate', 'maxbitrate', 'ext'];
 export const REQUEST_URL = 'https://rtb.openx.net/openrtbb/prebidjs';
-export const SYNC_URL = 'https://u.openx.net/w/1.0/pd?ph=2d1251ae-7f3a-47cf-bd2a-2f288854a0ba';
-
+export const SYNC_URL = 'https://u.openx.net/w/1.0/pd';
+export const DEFAULT_PH = '2d1251ae-7f3a-47cf-bd2a-2f288854a0ba';
 export const spec = {
   code: 'openx',
   supportedMediaTypes: [BANNER, VIDEO],
@@ -251,6 +251,16 @@ function getFloor(bid, mediaType) {
 }
 
 function interpretResponse(resp, req) {
+  // pass these from request to the responses for use in userSync
+  if (req.data.ext) {
+    if (req.data.ext.delDomain) {
+      utils.deepSetValue(resp, 'body.ext.delDomain', req.data.ext.delDomain);
+    }
+    if (req.data.ext.platform) {
+      utils.deepSetValue(resp, 'body.ext.platform', req.data.ext.platform);
+    }
+  }
+
   const respBody = resp.body;
   if ('nbr' in respBody) {
     return [];
@@ -273,8 +283,12 @@ function interpretResponse(resp, req) {
         meta: { advertiserDomains: bid.adomain }
       };
 
-      if (response.mediaType === VIDEO && bid.nurl) {
-        response.vastUrl = bid.nurl;
+      if (response.mediaType === VIDEO) {
+        if (bid.nurl) {
+          response.vastUrl = bid.nurl;
+        } else {
+          response.vastXml = bid.adm;
+        }
       } else {
         response.ad = bid.adm;
       }
@@ -310,12 +324,19 @@ function getUserSyncs(syncOptions, responses, gdprConsent, uspConsent) {
     if (uspConsent) {
       queryParamStrings.push('us_privacy=' + encodeURIComponent(uspConsent));
     }
-    if (responses.length > 0 && responses[0].body && responses[0].body.ext && responses[0].body.ext.sync_url) {
-      syncUrl = responses[0].body.ext.sync_url
+    if (responses.length > 0 && responses[0].body && responses[0].body.ext) {
+      const ext = responses[0].body.ext;
+      if (ext.delDomain) {
+        syncUrl = `https://${ext.delDomain}/w/1.0/pd`
+      } else if (ext.platform) {
+        queryParamStrings.push('ph=' + ext.platform)
+      }
+    } else {
+      queryParamStrings.push('ph=' + DEFAULT_PH)
     }
     return [{
       type: pixelType,
-      url: `${syncUrl}${queryParamStrings.length > 0 ? '&' + queryParamStrings.join('&') : ''}`
+      url: `${syncUrl}${queryParamStrings.length > 0 ? '?' + queryParamStrings.join('&') : ''}`
     }];
   }
 }

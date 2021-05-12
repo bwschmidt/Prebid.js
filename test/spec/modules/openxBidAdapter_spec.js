@@ -1,9 +1,11 @@
 import {expect} from 'chai';
-import {spec, REQUEST_URL, SYNC_URL} from 'modules/openxBidAdapter.js';
+import {spec, REQUEST_URL, SYNC_URL, DEFAULT_PH} from 'modules/openxBidAdapter.js';
 import {newBidder} from 'src/adapters/bidderFactory.js';
 import {BANNER, VIDEO} from 'src/mediaTypes.js';
 import {config} from 'src/config.js';
 import * as utils from 'src/utils.js';
+
+const DEFAULT_SYNC = SYNC_URL + '?ph=' + DEFAULT_PH;
 
 describe('OpenxRtbAdapter', function () {
   const adapter = newBidder(spec);
@@ -981,6 +983,25 @@ describe('OpenxRtbAdapter', function () {
     context('when there is no response', function () {
       let bids;
       beforeEach(function () {
+        bidRequestConfigs = [{
+          bidder: 'openx',
+          params: {
+            unit: '12345678',
+            delDomain: 'test-del-domain'
+          },
+          adUnitCode: 'adunit-code',
+          mediaTypes: {
+            banner: {
+              sizes: [[300, 250], [300, 600]],
+            },
+          },
+          bidId: 'test-bid-id',
+          bidderRequestId: 'test-bidder-request-id',
+          auctionId: 'test-auction-id'
+        }];
+
+        bidRequest = spec.buildRequests(bidRequestConfigs, {refererInfo: {}})[0];
+
         bidResponse = {nbr: 0}; // Unknown error
         bids = spec.interpretResponse({body: bidResponse}, bidRequest);
       });
@@ -1189,15 +1210,23 @@ describe('OpenxRtbAdapter', function () {
         {pixelEnabled: true},
         []
       );
-      expect(syncs).to.deep.equal([{type: 'image', url: SYNC_URL}]);
+      expect(syncs).to.deep.equal([{type: 'image', url: DEFAULT_SYNC}]);
     });
 
     it('should register custom syncUrl when exists', function () {
       let syncs = spec.getUserSyncs(
         {pixelEnabled: true},
-        [{body: {ext: {sync_url: 'http://url.com/sync?id=4'}}}]
+        [{body: {ext: {delDomain: 'www.url.com'}}}]
       );
-      expect(syncs).to.deep.equal([{type: 'image', url: 'http://url.com/sync?id=4'}]);
+      expect(syncs).to.deep.equal([{type: 'image', url: 'https://www.url.com/w/1.0/pd'}]);
+    });
+
+    it('should register custom syncUrl when exists', function () {
+      let syncs = spec.getUserSyncs(
+        {pixelEnabled: true},
+        [{body: {ext: {platform: 'abc'}}}]
+      );
+      expect(syncs).to.deep.equal([{type: 'image', url: SYNC_URL + '?ph=abc'}]);
     });
 
     it('when iframe sync is allowed, it should register an iframe sync', function () {
@@ -1205,7 +1234,7 @@ describe('OpenxRtbAdapter', function () {
         {iframeEnabled: true},
         []
       );
-      expect(syncs).to.deep.equal([{type: 'iframe', url: SYNC_URL}]);
+      expect(syncs).to.deep.equal([{type: 'iframe', url: DEFAULT_SYNC}]);
     });
 
     it('should prioritize iframe over image for user sync', function () {
@@ -1213,7 +1242,7 @@ describe('OpenxRtbAdapter', function () {
         {iframeEnabled: true, pixelEnabled: true},
         []
       );
-      expect(syncs).to.deep.equal([{type: 'iframe', url: SYNC_URL}]);
+      expect(syncs).to.deep.equal([{type: 'iframe', url: DEFAULT_SYNC}]);
     });
 
     describe('when gdpr applies', function () {
@@ -1257,7 +1286,7 @@ describe('OpenxRtbAdapter', function () {
       const privacyString = 'TEST';
       beforeEach(() => {
         usPrivacyConsent = 'TEST';
-        uspPixelUrl = `${SYNC_URL}&us_privacy=${privacyString}`
+        uspPixelUrl = `${DEFAULT_SYNC}&us_privacy=${privacyString}`
       });
       it('should send the us privacy string, ', () => {
         let [{url}] = spec.getUserSyncs(
