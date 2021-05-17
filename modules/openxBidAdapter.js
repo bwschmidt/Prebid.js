@@ -98,6 +98,28 @@ function enrichImp(imp, bid, floor) {
   }
 }
 
+function enrichFloc(req, bid) {
+  if (bid.userId && bid.userId.flocId) {
+    const flocObject = {
+      id: 'chrome',
+      segment: [{
+        id: 'floc',
+        value: bid.userId.flocId.id.toString(),
+        ext: {
+          ver: bid.userId.flocId.version
+        }
+      }]
+    }
+    if (!req.user) {
+      req.user = {};
+    }
+    if (!req.user.data) {
+      req.user.data = [];
+    }
+    req.user.data.push(flocObject);
+  }
+}
+
 function createVideoRequest(bid, bidderRequest) {
   let width;
   let height;
@@ -219,6 +241,7 @@ function getBaseRequest(bid, bidderRequest) {
   if (commonFpd.user) {
     utils.mergeDeep(req, {user: commonFpd.user});
   }
+  enrichFloc(req, bid)
   return req;
 }
 

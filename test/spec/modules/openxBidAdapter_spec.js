@@ -342,6 +342,48 @@ describe('OpenxRtbAdapter', function () {
         })
       })
 
+      describe('FlocId', function() {
+        const mockBidderRequest = {refererInfo: {}};
+
+        it('send the FlocId if it is present', function() {
+          const bidRequests = [{
+            bidder: 'openx',
+            params: {
+              unit: '12345678-banner',
+              delDomain: 'test-del-domain'
+            },
+            adUnitCode: 'adunit-code',
+            mediaTypes: {
+              banner: {
+                sizes: [[300, 250], [300, 600]]
+              }
+            },
+            userId: {
+              flocId: {
+                id: '1234',
+                version: 'chrome1.1'
+              }
+            },
+            bidId: 'test-bid-id',
+            bidderRequestId: 'test-bidder-request-id',
+            auctionId: 'test-auction-id',
+            transactionId: 'test-transaction-id-1'
+          }];
+          const request = spec.buildRequests(bidRequests, mockBidderRequest);
+          let data = request[0].data;
+          expect(data.user.data).to.deep.equal([{
+            id: 'chrome',
+            segment: [{
+              id: 'floc',
+              value: '1234',
+              ext: {
+                ver: 'chrome1.1'
+              }
+            }]
+          }]);
+        });
+      });
+
       describe('FPD', function() {
         let bidRequests;
         const mockBidderRequest = {refererInfo: {}};
