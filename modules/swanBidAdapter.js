@@ -53,10 +53,6 @@ function createBannerRequest(bids, bidderRequest) {
       banner: {
         format: toFormat(bid.mediaTypes.banner.sizes),
         topframe: utils.inIframe() ? 0 : 1
-      },
-      ext: {
-        Offername: bid.params.swan_offer_name,
-        Offer: window.swan_offers[bid.params.swan_offer_name]
       }
     };
     if (floor > 0) {
@@ -103,10 +99,6 @@ function createVideoRequest(bid, bidderRequest) {
       w: width,
       h: height,
       topframe: utils.inIframe() ? 0 : 1
-    },
-    ext: {
-      Offername: bid.params.swan_offer_name,
-      Offer: window.swan_offers[bid.params.swan_offer_name]
     }
   }];
   if (floor > 0) {
@@ -208,7 +200,21 @@ function getFloor(bid, mediaType) {
 
 function interpretResponse(resp, req) {
   const respBody = resp.body;
-  let imps = req.data.imp;
+
+  if (respBody.ext && respBody.ext.swan_owids) {
+    const owids = respBody.ext.swan_owids;
+    window.swan_owids = window.swan_owids || {};
+    owids.forEach(owid => {
+      if (!window.swan_owids[owid.placement]) {
+        window.swan_owids[owid.placement] = [];
+      }
+      window.swan_owids[owid.placement].push(owid.owid)
+    })
+  }
+
+  if (!respBody) {
+    return [];
+  }
 
   let bids = [];
   respBody.seatbid.forEach(seatbid => {
@@ -227,25 +233,20 @@ function interpretResponse(resp, req) {
         meta: { advertiserDomains: bid.adomain }
       };
 
-      let adm = bid.adm;
-      let imp = imps.find(i => i.id == bid.impid);
-      if (bid.ext && bid.ext.OWID) {
-        // if the ssp used swan data, add it to the tree
-        const name = imp.ext.Offername
-        utils.deepSetValue(response, 'meta.swan_offer_name', name);
-        if (window.swan_offers[name]) {
-          if (bid.ext.OWID == window.swan_offers[name].OWID) {
-            if (bid.ext.Children != null) {
-              window.swan_offers[name].Children = window.swan_offers[name].Children || []
-              window.swan_offers[imp.ext.Offername].Children = window.swan_offers[imp.ext.Offername].Children.concat(bid.ext.Children)
-            }
-          }
+      if (response.mediaType === VIDEO) {
+        if (bid.nurl) {
+          response.vastUrl = bid.nurl;
+        } else {
+          response.vastXml = bid.adm;
         }
-      }
-      if (response.mediaType === VIDEO && bid.nurl) {
-        response.vastUrl = bid.nurl;
       } else {
-        response.ad = adm;
+        response.ad = bid.adm;
+      }
+
+      if (bid.ext) {
+        response.meta.networkId = bid.ext.dsp_id;
+        response.meta.advertiserId = bid.ext.buyer_id;
+        response.meta.brandId = bid.ext.brand_id;
       }
       return response
     })];
@@ -253,7 +254,6 @@ function interpretResponse(resp, req) {
 
   return bids;
 }
-
 /**
  * @param syncOptions
  * @param responses
