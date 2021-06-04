@@ -204,11 +204,16 @@ function interpretResponse(resp, req) {
   if (respBody.ext && respBody.ext.swan_owids) {
     const owids = respBody.ext.swan_owids;
     window.swan_owids = window.swan_owids || {};
-    owids.forEach(owid => {
-      if (!window.swan_owids[owid.placement]) {
-        window.swan_owids[owid.placement] = [];
+    owids.forEach(data => {
+      let tagid = "unknown"
+      console.log(data)
+      const imp = req.data.imp.find((x) => x.id == data.impid)
+      if (imp) {
+        tagid = imp.tagid;
       }
-      window.swan_owids[owid.placement].push(owid.owid)
+      if (window.swan) {
+        window.swan.addSignature(tagid, data.owid);
+      }
     })
   }
 
