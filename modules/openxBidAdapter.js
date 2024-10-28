@@ -22,6 +22,15 @@ export const spec = {
 
 registerBidder(spec);
 
+let aad;
+if ('getInterestGroupAdAuctionData' in navigator) {
+  navigator.getInterestGroupAdAuctionData({
+    "seller": "https://pa.openx.net"
+  }).then((a)=> aad = a)
+} else {
+  console.log('getInterestGroupAdAuctionData not found')
+}
+
 const converter = ortbConverter({
   context: {
     netRevenue: true,
@@ -71,7 +80,12 @@ const converter = ortbConverter({
     if (bid.params.test) {
       req.test = 1
     }
-    return req;
+
+    if (aad) {
+      return addBnA(req, aad)
+    } else {
+      return req;
+    }
   },
   bidResponse(buildBidResponse, bid, context) {
     const bidResponse = buildBidResponse(bid, context);
@@ -171,6 +185,17 @@ function createRequest(bidRequests, bidderRequest, mediaType) {
     method: 'POST',
     url: config.getConfig('openxOrtbUrl') || REQUEST_URL,
     data: converter.toORTB({bidRequests, bidderRequest, context: {mediaType}})
+  }
+}
+
+function addBnA(req, adAuctionData) {
+  console.log("addBnA", adAuctionData)
+  if (adAuctionData.request && adAuctionData.requestId) {
+    utils.deepSetValue(req, 'ext.aad.request', btoa(String.fromCharCode.apply(null, adAuctionData.request)));
+    utils.deepSetValue(req, 'ext.aad.requestId', adAuctionData.requestId);
+    return req;
+  } else {
+    return req;
   }
 }
 

@@ -55,6 +55,7 @@ export function toFetchRequest(url, data, options = {}) {
   if (options.keepalive) {
     rqOpts.keepalive = true;
   }
+  rqOpts.adAuctionHeaders = true;
   return dep.makeRequest(url, rqOpts);
 }
 
