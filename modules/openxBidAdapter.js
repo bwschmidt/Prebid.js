@@ -22,13 +22,31 @@ export const spec = {
 
 registerBidder(spec);
 
+// This is a temporary solution to get BnA info from the browser
+// adapters dont support async functions yet
+function sleepFor(sleepDuration) {
+  var now = new Date().getTime();
+  while(new Date().getTime() < now + sleepDuration){}
+}
+i = 0
+while (!('getInterestGroupAdAuctionData' in navigator)) {
+  i++;
+  sleepFor(100);
+  utils.logInfo(`waiting for getInterestGroupAdAuctionData to be available for ${i*100}ms`);
+
+  if (i > 100) {
+    utils.logError('function getInterestGroupAdAuctionData not found after 10s');
+    break;
+  }
+}
 let aad;
 if ('getInterestGroupAdAuctionData' in navigator) {
+  utils.logInfo('function getInterestGroupAdAuctionData is available');
   navigator.getInterestGroupAdAuctionData({
-    "seller": "https://pa.openx.net"
-  }).then((a)=> aad = a)
+    "seller": "https://rtb.openx.net"
+  }).then((a)=> aad = a);
 } else {
-  console.log('getInterestGroupAdAuctionData not found')
+  utils.logError('function getInterestGroupAdAuctionData not found!!');
 }
 
 const converter = ortbConverter({
@@ -81,9 +99,21 @@ const converter = ortbConverter({
       req.test = 1
     }
 
+    j=0;
+    while (aad == undefined) {
+      j++;
+      sleepFor(100);
+      utils.logInfo(`waiting for AdAuctionData to be available for ${j*100}ms`);
+    
+      if (j > 50) {
+        utils.logError('AdAuctionData not found after 5s');
+        break;
+      }
+    }
     if (aad) {
       return addBnA(req, aad)
     } else {
+      utils.logInfo('getInterestGroupAdAuctionData not available yet or empty, skipping BnA', aad);
       return req;
     }
   },
@@ -112,6 +142,14 @@ const converter = ortbConverter({
     let fledgeAuctionConfigs = utils.deepAccess(ortbResponse, 'ext.fledge_auction_configs');
     if (fledgeAuctionConfigs) {
       fledgeAuctionConfigs = Object.entries(fledgeAuctionConfigs).map(([bidId, cfg]) => {
+        if (cfg.serverResponse) {
+          utils.logInfo('Received BnA response', cfg.serverResponse)
+          cfg.serverResponse = base64ToByteArray(cfg.serverResponse);
+          return {
+            bidId,
+            config: cfg
+          }
+        }
         return {
           bidId,
           config: mergeDeep(Object.assign({}, cfg), {
@@ -157,6 +195,17 @@ const converter = ortbConverter({
   }
 });
 
+function base64ToByteArray(base64String) {
+  const binaryString = atob(base64String);
+  const bytes = new Uint8Array(binaryString.length);
+
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
 function isBidRequestValid(bidRequest) {
   const hasDelDomainOrPlatform = bidRequest.params.delDomain ||
     bidRequest.params.platform;
@@ -189,7 +238,7 @@ function createRequest(bidRequests, bidderRequest, mediaType) {
 }
 
 function addBnA(req, adAuctionData) {
-  console.log("addBnA", adAuctionData)
+  utils.logInfo("adding BnA information to request", adAuctionData)
   if (adAuctionData.request && adAuctionData.requestId) {
     utils.deepSetValue(req, 'ext.aad.request', btoa(String.fromCharCode.apply(null, adAuctionData.request)));
     utils.deepSetValue(req, 'ext.aad.requestId', adAuctionData.requestId);
